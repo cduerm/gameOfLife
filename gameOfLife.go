@@ -21,9 +21,13 @@ type Gol struct {
 	row, col             int
 	step                 int
 	alive                int
-	ruleCreate, ruleLive [10]bool
+	ruleCreate, ruleLive GolRule
 	boundaryCondition    BoundaryCondition
 }
+
+// GolRule contains the number of neighbours for which a Cell
+// stays alive or is newly born.
+type GolRule [10]bool
 
 // Boundary retrieves the boundary conditon
 func (g *Gol) Boundary() BoundaryCondition {
@@ -40,8 +44,10 @@ func (g *Gol) GetSize() (w, h int) {
 	return g.col, g.row
 }
 
-// NewGol initializes a new Gol structure with
-func NewGol(row, col int, ruleCreate, ruleLive [10]bool, borderStyle BoundaryCondition, p float32) *Gol {
+// NewGol initializes a new Gol structure with a specified size, rules to
+// create and keep living cells, the boundary conditions and a filling fraction
+// p which gives the chance for each cell to be alive in the beginning.
+func NewGol(row, col int, ruleCreate, ruleLive GolRule, borderStyle BoundaryCondition, p float32) *Gol {
 	g := new(Gol)
 	g.row = row
 	g.col = col
@@ -66,7 +72,7 @@ func NewGol(row, col int, ruleCreate, ruleLive [10]bool, borderStyle BoundaryCon
 // MakeRule creates a live or born rule from a slice of integers.
 // With a live rule []int{2,3} a cell would survive with either 2 or 3
 // neighbours.
-func MakeRule(i []int) (rule [10]bool) {
+func MakeRule(i []int) (rule GolRule) {
 	for _, val := range i {
 		rule[val] = true
 	}
