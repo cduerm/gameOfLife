@@ -2,31 +2,15 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"math/rand"
-	"time"
 	"strconv"
-	ui "github.com/gizak/termui"
+	"time"
+
 	gol "github.com/cduerm/gameOfLife"
+	ui "github.com/gizak/termui"
 )
 
-// Randbedingungen
-const (
-	periodic = 0
-	empty    = 1
-	full     = 2
-)
-
-type gol struct {
-	field                [][]bool
-	row, col             int
-	step                 int
-	alive                int
-	ruleCreate, ruleLive [10]bool
-	borderStyle          int
-}
-
-var game gol
+var game gol.Game
 var stopchannel chan bool
 var running bool = false
 var editmode bool = false
@@ -62,7 +46,7 @@ func main() {
 	flag.Parse()
 
 	rand.Seed(int64(time.Now().Nanosecond()))
-	game.Init(*size, *size, MakeRule([]int{3}), MakeRule([]int{2, 3}), *border, float32(*filling))
+	game = *gol.New(*size, *size, gol.MakeRule([]int{3}), gol.MakeRule([]int{2, 3}), gol.BoundaryCondition(*border), float32(*filling))
 
 	err := ui.Init()
 	if err != nil {
@@ -71,13 +55,13 @@ func main() {
 	defer ui.Close()
 	InitScreen()
 
-	InstallHandler()
+	InstallHandlers()
 
 	ui.Render(header, footer, board, keys, debug)
 	ui.Loop()
 }
 
-func InstallHandler() {
+func InstallHandlers() {
 	ui.Handle("sys/kbd", func(ev ui.Event) {
 		key := ev.Path[9:]
 		switch key {
@@ -85,8 +69,8 @@ func InstallHandler() {
 			ui.StopLoop()
 		case "s":
 			if !running {
-				game.Evolution()
-				board.Text = game.ToString()
+				game.DoStep()
+				board.Text = ToString(&game)
 				ui.Render(board)
 			}
 		case "e":
@@ -109,7 +93,7 @@ func InstallHandler() {
 				debug.Text = "clear"
 			}
 		case "f":
-			if editmode{
+			if editmode {
 				debug.Text = "fill"
 			}
 		case "p":
@@ -122,17 +106,19 @@ func InstallHandler() {
 			}
 		case "0", "1", "2":
 			if editmode {
-				bs, _ := strconv.Atoi(key)
+				number, _ := strconv.Atoi(key)
+				bs := gol.BoundaryCondition(number)
+
 				switch bs {
-				case empty:
+				case gol.BCEmpty:
 					debug.Text = "empty boundary"
-				case full:
+				case gol.BCFull:
 					debug.Text = "full boundary"
-				case periodic:
+				case gol.BCPeriodic:
 					debug.Text = "periodic boundary"
 				}
-				game.borderStyle = bs
-				board.Text = game.ToString()
+				game.SetBoundary(bs)
+				board.Text = ToString(&game)
 				ui.Render(board)
 			}
 		case "+":
@@ -162,9 +148,9 @@ func InitScreen() {
 	footer.Y = ui.TermHeight() - 3
 	footer.Height = 0
 
-	board = ui.NewPar(game.ToString())
-	board.Width = game.col * 2 + 4
-	board.Height = game.row + 4
+	board = ui.NewPar(ToString(&game))
+	board.Width = game.Cols()*2 + 4
+	board.Height = game.Rows() + 4
 	board.X = (ui.TermWidth() - 27 - board.Width) / 2
 	board.Y = (ui.TermHeight() - board.Height) / 2
 	board.Border = false
@@ -202,84 +188,42 @@ func Start() {
 	}
 }
 
-func Autorun(g *gol, board *ui.Par) (chan bool) {
+func Autorun(g *gol.Game, board *ui.Par) chan bool {
 	stopchan := make(chan bool)
-	go func () {
-		runLoop:
+	go func() {
+	runLoop:
 		for {
 			select {
 			case <-stopchan:
 				break runLoop
 			default:
-				g.Evolution()
-				board.Text = g.ToString()
+				g.DoStep()
+				board.Text = ToString(g)
 				ui.Render(board)
-				time.Sleep(interval*time.Millisecond)
+				time.Sleep(interval * time.Millisecond)
 			}
 		}
 	}()
 	return stopchan
 }
 
-func (g *gol) Init(row, col int, ruleCreate, ruleLive [10]bool, borderStyle int, p float32) {
-	g.row = row
-	g.col = col
-	g.ruleCreate = ruleCreate
-	g.ruleLive = ruleLive
-	g.borderStyle = borderStyle
-	g.step = 0
-
-	g.field = make([][]bool, g.row)
-	for r := range g.field {
-		g.field[r] = make([]bool, col)
-		for c := range g.field[r] {
-			if rand.Float32() < p {
-				g.field[r][c] = true
-				g.alive++
-			}
-		}
-	}
-}
-
-func MakeRule(i []int) (rule [10]bool) {
-	for _, val := range i {
-		rule[val] = true
-	}
-	return
-}
-
-func (g *gol) Print() {
-	//fmt.Println("Step: ", g.step)
-	for _, v := range g.field {
-		for _, item := range v {
-			if item {
-				fmt.Print("x ")
-			} else {
-				fmt.Print(". ")
-			}
-		}
-		fmt.Print("\n")
-	}
-	//fmt.Print("alive: ", g.alive, "\n\n")
-}
-
-func (g *gol) ToString() string {
+func ToString(g *gol.Game) string {
 	var border string
-	switch g.borderStyle {
-		case periodic:
-			border = "[#](bg-white,fg-black)"
-		case empty:
-			border = "[.](bg-white,fg-black)"
-		case full:
-			border = "[x](bg-white,fg-black)"
-		}
+	switch g.Boundary() {
+	case gol.BCPeriodic:
+		border = "[#](bg-white,fg-black)"
+	case gol.BCEmpty:
+		border = "[.](bg-white,fg-black)"
+	case gol.BCFull:
+		border = "[x](bg-white,fg-black)"
+	}
 	var s string = ""
 	//s += fmt.Sprintln("Step: ", g.step)
-	for i := 0 ; i < game.col + 2 ; i++ {
+	for i := 0; i < game.Cols()+2; i++ {
 		s += border + " "
 	}
 	s += "\n"
-	for _, v := range g.field {
+	for _, v := range g.Field() {
 		s += border + " "
 		for _, item := range v {
 			if item {
@@ -290,71 +234,9 @@ func (g *gol) ToString() string {
 		}
 		s += border + "\n"
 	}
-	for i := 0 ; i < game.col + 2 ; i++ {
+	for i := 0; i < game.Cols()+2; i++ {
 		s += border + " "
 	}
 	//s += fmt.Sprint("alive: ", g.alive)
 	return s
-}
-
-func (g *gol) Cell(i, j int) bool {
-	if i >= 0 && i < g.row && j >= 0 && j < g.col {
-		return g.field[i][j]
-	}
-
-	switch g.borderStyle {
-	case empty:
-		return false
-	case full:
-		return true
-	case periodic:
-		return g.field[(i+g.row)%g.row][(j+g.col)%g.col]
-	}
-
-	return false
-}
-
-func (g *gol) Evolution() {
-	var neighbours int
-	var iField [][]bool
-	iField = make([][]bool, g.row)
-	for i := range iField {
-		iField[i] = make([]bool, g.col)
-	}
-
-	g.step++
-
-	for i := 0; i < g.row; i++ {
-		for j := 0; j < g.col; j++ {
-			neighbours = 0
-			if g.Cell(i, j) {
-				neighbours--
-			}
-
-			for i1 := -1; i1 < 2; i1++ {
-				for j1 := -1; j1 < 2; j1++ {
-					if g.Cell(i+i1, j+j1) {
-						neighbours++
-					}
-				}
-			}
-			if g.Cell(i, j) && !g.ruleLive[neighbours] {
-				// fmt.Println("die:  ",i+1,j+1,neighbours)
-				iField[i][j] = false
-				g.alive--
-			} else if !g.Cell(i, j) && g.ruleCreate[neighbours] {
-				// fmt.Println("born: ",i+1,j+1,neighbours)
-				iField[i][j] = true
-				g.alive++
-			} else {
-				iField[i][j] = g.Cell(i, j)
-			}
-		}
-	}
-
-	for i := 0; i < g.row; i++ {
-		for j := 0; j < g.col; j++ {
-			g.field[i][j] = iField[i][j]
-		}
-	}
 }
